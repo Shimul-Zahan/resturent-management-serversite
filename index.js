@@ -2,16 +2,21 @@ const express = require('express')
 const app = express();
 const cors = require('cors');
 const port = process.env.PORT || 5000;
+const jwt = require('jsonwebtoken');
+const cookieParser = require('cookie-parser')
+require('dotenv').config();
 
-// W70XoQoxHaPKVCFV
-// bistroBoss
 
-app.use(cors());
+app.use(cors({
+    origin: ['http://localhost:5173'],
+    credentials: true,
+}));
 app.use(express.json());
+app.use(cookieParser());
 
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const uri = "mongodb+srv://bistroBoss:W70XoQoxHaPKVCFV@shimulclaster1.85diumq.mongodb.net/?retryWrites=true&w=majority";
+const uri = `mongodb+srv://${process.env.DBNAME}:${process.env.DBPASS}@shimulclaster1.85diumq.mongodb.net/?retryWrites=true&w=majority`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
@@ -22,18 +27,28 @@ const client = new MongoClient(uri, {
     }
 });
 
+// middleware for verifing the token
+const verify = (req, res, next) => {
+    console.log(req.cookies)
+    // if(!req.cookies) {
+    //     // return res.send({ message: 'Unauthorized access' });
+    //     console.log('No cookie')
+    // }
+    next();
+}
+
 async function run() {
     try {
-
         const menus = client.db("bistroDB").collection("menus");
         const reviews = client.db("bistroDB").collection("reviews");
         const cartCollections = client.db("bistroDB").collection("cartCollections");
-        
-        app.get('/', (req, res) => {
+        const userCollections = client.db("bistroDB").collection("userCollections");
+
+        app.get('/', verify, (req, res) => {
             res.send('Hello Server yess');
         })
 
-        app.get('/menus', async (req, res) => {
+        app.get('/menus', verify, async (req, res) => {
             try {
                 const result = await menus.find().toArray();
                 res.send(result);
@@ -62,10 +77,56 @@ async function run() {
             }
         })
 
+        app.get('/users', async (req, res) => {
+            try {
+                const result = await userCollections.find().toArray();
+                res.send(result);
+            } catch (err) {
+                console.log(err)
+            }
+        })
+
+
+        // web security work here
+        app.post('/jwt', (req, res) => {
+            try {
+                const user = req.body;
+                const token = jwt.sign(user, process.env.SECRET, { expiresIn: '10h' })
+                res.cookie('token', token, {
+                    httpOnly: true,
+                    secure: false,
+                }).send({ token: token })
+            } catch (err) {
+                console.log(err)
+            }
+        })
+
+        app.post('/logout', (req, res) => {
+            res.clearCookie('token', { maxAge: 0 }).send({ message: 'successfully removed cookie' });
+        })
+
+
         app.post('/cart', async (req, res) => {
             try {
                 const item = req.body;
                 const result = await cartCollections.insertOne(item);
+                res.send(result);
+            } catch (err) {
+                console.log(err)
+            }
+        })
+
+        app.post('/users', async (req, res) => {
+            try {
+                const user = req.body;
+                console.log(user)
+                const email = user.email;
+                const query = { email: email }
+                const userEmail = await userCollections.findOne(query);
+                if (userEmail) {
+                    return res.send("Email Already Exist", userEmail);
+                }
+                const result = await userCollections.insertOne(user);
                 res.send(result);
             } catch (err) {
                 console.log(err)
@@ -77,6 +138,33 @@ async function run() {
                 const id = req.params.id;
                 const query = { _id: new ObjectId(id) };
                 const result = await cartCollections.deleteOne(query);
+                res.send(result);
+            } catch (err) {
+                console.log(err)
+            }
+        })
+
+        app.delete('/users/:id', async (req, res) => {
+            try {
+                const id = req.params.id;
+                const query = { _id: new ObjectId(id) };
+                const result = await userCollections.deleteOne(query);
+                res.send(result);
+            } catch (err) {
+                console.log(err)
+            }
+        })
+
+        app.patch('/users/admin/:id', async (req, res) => {
+            try {
+                const id = req.params.id;
+                const query = { _id: new ObjectId(id) };
+                const updateDoc = {
+                    $set: {
+                        role: 'admin',
+                    }
+                }
+                const result = await userCollections.updateOne(query, updateDoc);
                 res.send(result);
             } catch (err) {
                 console.log(err)
