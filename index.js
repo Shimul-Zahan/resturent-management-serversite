@@ -27,15 +27,6 @@ const client = new MongoClient(uri, {
     }
 });
 
-// middleware for verifing the token
-const verify = (req, res, next) => {
-    console.log(req.cookies)
-    // if(!req.cookies) {
-    //     // return res.send({ message: 'Unauthorized access' });
-    //     console.log('No cookie')
-    // }
-    next();
-}
 
 async function run() {
     try {
@@ -44,12 +35,41 @@ async function run() {
         const cartCollections = client.db("bistroDB").collection("cartCollections");
         const userCollections = client.db("bistroDB").collection("userCollections");
 
+        // all the middleware
+
+        // middleware for verifing the token
+        const verify = (req, res, next) => {
+            const token = req.cookies?.token
+            // console.log("verify token",token)
+            if (!token) {
+                return res.status(401).send({ message: 'Unauthorized access' });
+            }
+            jwt.verify(token, process.env.SECRET, (err, decoded) => {
+                if (err) {
+                    return res.status(403).send({ message: 'Access forbiden' })
+                }
+                req.decode = decoded
+                next();
+            })
+        }
+
+        const verifyAdmin = async (req, res, next) => {
+            const tokenEmail = req.decode.email
+            const user = await userCollections.findOne({ email: tokenEmail })
+            const isAdmin = user?.role === 'admin'
+            if (!isAdmin) {
+                res.status(401).send({ message: 'unauthorized access' });
+            }
+            next();
+        }
+
         app.get('/', verify, (req, res) => {
             res.send('Hello Server yess');
         })
 
-        app.get('/menus', verify, async (req, res) => {
+        app.get('/menus', async (req, res) => {
             try {
+                // console.log(req.decode)
                 const result = await menus.find().toArray();
                 res.send(result);
             } catch (err) {
@@ -77,7 +97,7 @@ async function run() {
             }
         })
 
-        app.get('/users', async (req, res) => {
+        app.get('/users', verify, verifyAdmin, async (req, res) => {
             try {
                 const result = await userCollections.find().toArray();
                 res.send(result);
@@ -119,12 +139,11 @@ async function run() {
         app.post('/users', async (req, res) => {
             try {
                 const user = req.body;
-                console.log(user)
                 const email = user.email;
                 const query = { email: email }
                 const userEmail = await userCollections.findOne(query);
                 if (userEmail) {
-                    return res.send("Email Already Exist", userEmail);
+                    return res.send("Email Already Exist");
                 }
                 const result = await userCollections.insertOne(user);
                 res.send(result);
@@ -153,6 +172,29 @@ async function run() {
             } catch (err) {
                 console.log(err)
             }
+        })
+
+        // cheek admin
+        // TODO: Ekhane bujhar ache kichu
+
+        app.get('/users/admin/:email', verify, async (req, res) => {
+            const userEmail = req.params.email;
+            const tokenEmail = req.decode?.email;
+            // console.log('email from user', userEmail)
+            // console.log('token from route',tokenEmail)
+            if (userEmail !== tokenEmail) {
+                return res.status(403).send({message: 'unauthorized access'})
+            }
+            // console.log("true in users admin api")
+            const query = { email: userEmail }
+            const user = await userCollections.findOne(query)
+            // console.log('admin', user)
+            let admin = false;
+            if (user) {
+                admin = user?.role === 'admin';
+            }
+            // console.log(admin, "admin");
+            res.send({ admin });
         })
 
         app.patch('/users/admin/:id', async (req, res) => {
